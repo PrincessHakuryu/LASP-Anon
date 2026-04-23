@@ -636,16 +636,24 @@ subroutine Ind_driver( energy,velocity,Nlist,List,IJK,N_plus,N_minus, Naccum_plu
       sigma_sp = scalebroad_sp * base_sigma_sp(vel_diff_sp(1), vel_diff_sp(2), vel_diff_sp(3))
 
       delta_sp = omega_sp + omegap_sp - omegadp_sp
-
-      WP3_sp = (fBEprime_sp - fBEdprime_sp) * &
-               exp(-(delta_sp*delta_sp)/(sigma_sp*sigma_sp)) / &
-               (sigma_sp*sqrt_pi_sp*omega_sp*omegap_sp*omegadp_sp)
-
-      WP3_plus_sp_total(idx) = WP3_sp
       Vp_sp = real(Vp_plus_matrix(idx), kind=sp)
 
-      gamma_plus_sp = hbarp_sp*pi_sp/four_sp * WP3_sp * Vp_sp*Vp_sp
-      gamma_plus_sp = gamma_plus_sp * five_point_six_zero_sp * one_eight_sp / nptk_sp
+      if (sigma_sp <= 0.0_sp) then
+         ! Keep indexing intact, but kill the singular event contribution
+         ! Be careful!! FP32 would cause sigma_sp=0 more often in extreme situations than FP64.... 
+         ! GUGUGAGA!!
+         WP3_sp        = 0.0_sp
+         gamma_plus_sp = 0.0_sp
+      else
+         WP3_sp = (fBEprime_sp - fBEdprime_sp) * &
+                  exp(-(delta_sp*delta_sp)/(sigma_sp*sigma_sp)) / &
+                  (sigma_sp*sqrt_pi_sp*omega_sp*omegap_sp*omegadp_sp)
+
+         gamma_plus_sp = hbarp_sp*pi_sp/four_sp * WP3_sp * Vp_sp*Vp_sp
+         gamma_plus_sp = gamma_plus_sp * five_point_six_zero_sp * one_eight_sp / nptk_sp
+      end if
+      
+      WP3_plus_sp_total(idx) = WP3_sp
 
       Indof2ndPhonon_plus(idx) = (ii-1)*Nbands + j
       Indof3rdPhonon_plus(idx) = (ss-1)*Nbands + k
@@ -677,16 +685,24 @@ subroutine Ind_driver( energy,velocity,Nlist,List,IJK,N_plus,N_minus, Naccum_plu
       sigma_sp = scalebroad_sp * base_sigma_sp(vel_diff_sp(1), vel_diff_sp(2), vel_diff_sp(3))
 
       delta_sp = omega_sp - omegap_sp - omegadp_sp
-
-      WP3_sp = (fBEprime_sp + fBEdprime_sp + one_sp) * &
-               exp(-(delta_sp*delta_sp)/(sigma_sp*sigma_sp)) / &
-               (sigma_sp*sqrt_pi_sp*omega_sp*omegap_sp*omegadp_sp)
-
-      WP3_minus_sp_total(idx) = WP3_sp
       Vp_sp = real(Vp_minus_matrix(idx), kind=sp)
 
-      gamma_minus_sp = hbarp_sp*pi_sp/four_sp * WP3_sp * Vp_sp*Vp_sp
-      gamma_minus_sp = gamma_minus_sp * five_point_six_zero_sp * one_eight_sp / nptk_sp
+      if (sigma_sp <= 0.0_sp) then
+         WP3_sp         = 0.0_sp
+         gamma_minus_sp = 0.0_sp
+      else
+         WP3_sp = (fBEprime_sp + fBEdprime_sp + one_sp) * &
+                  exp(-(delta_sp*delta_sp)/(sigma_sp*sigma_sp)) / &
+                  (sigma_sp*sqrt_pi_sp*omega_sp*omegap_sp*omegadp_sp)
+
+         gamma_minus_sp = hbarp_sp*pi_sp/four_sp * WP3_sp * Vp_sp*Vp_sp
+         gamma_minus_sp = gamma_minus_sp * five_point_six_zero_sp * one_eight_sp / nptk_sp
+      end if
+
+     
+      WP3_minus_sp_total(idx) = WP3_sp
+      
+
 
       Indof2ndPhonon_minus(idx) = (ii-1)*Nbands + j
       Indof3rdPhonon_minus(idx) = (ss-1)*Nbands + k
@@ -695,6 +711,7 @@ subroutine Ind_driver( energy,velocity,Nlist,List,IJK,N_plus,N_minus, Naccum_plu
   !$acc end data
   !================ OpenACC: 结束并行区 ===============================
   if (myid == 0) write(*,'(A,F0.3,A)') " Info: GPU done,starting scattering results on CPU at ", MPI_Wtime()-start_time, " s"
+ 
   !---------------- phase 2: scatter (segment sum by counts/offsets) ----------------
   countm = 0
   do nn = 1, nstates
@@ -950,6 +967,7 @@ subroutine NP_driver(energy,velocity,Nlist,List,IJK, &
   if (allocated(Pspace_plus_total_sp))   deallocate(Pspace_plus_total_sp)
   if (allocated(Pspace_minus_total_sp))  deallocate(Pspace_minus_total_sp)
 end subroutine NP_driver
+
   ! RTA-only version of Ind_plus.
   subroutine RTA_plus(nn,q,omega,energy,velocity,IJK,&
        Gamma_plus,WP3_plus)
