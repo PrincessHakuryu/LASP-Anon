@@ -297,8 +297,11 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
     !$acc&       Naccum_minus_array, Indof2ndPhonon_minus,                    &
     !$acc&       Indof3rdPhonon_minus, Gamma_minus_sp)                        &
     !$acc& copyin(omega_sp, velocity_sp, tau_zero_sp)                          &
-    !$acc& copy(DeltaF_sp, F_sp)                                              &
-    !$acc& if(IsoN>0) copyin(Iso_Ind1, Iso_Ind2, Gamma_iso_sp)
+    !$acc& copy(DeltaF_sp, F_sp)
+
+    if (IsoN > 0) then
+      !$acc enter data copyin(Iso_Ind1, Iso_Ind2, Gamma_iso_sp)
+    end if
 
 
     !$acc parallel loop gang collapse(2)                                      &
