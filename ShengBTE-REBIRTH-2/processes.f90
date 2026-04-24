@@ -1182,7 +1182,7 @@ end subroutine NP_driver
        end do
     end do
 
-    !$OMP PARALLEL DO default(none) schedule(dynamic,1) shared(Nbands,NList,myid,nstates) &
+    !$OMP PARALLEL DO default(shared) schedule(dynamic,1) shared(Nbands,NList,myid,nstates) &
     !$OMP & shared(energy_sp,velocity_sp,List,IJK,Naccum_plus_array,Naccum_minus_array,omega_max) &
     !$OMP & shared(WP3_plus_sp,WP3_minus_sp,rate_scatt_plus_sp,rate_scatt_minus_sp,Index_N) &
     !$OMP & shared(Vp_plus_matrix,Vp_minus_matrix,scalebroad,onlyharmonic,Ngrid) &
