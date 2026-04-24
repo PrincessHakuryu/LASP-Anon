@@ -1127,34 +1127,158 @@ end subroutine NP_driver
     real(kind=dp),intent(out) :: WP3_minus(Nbands,Nlist)
 
     integer :: i
-    integer :: ll, q(3)
-    integer :: mm, nn
-    real(kind=dp) :: Gamma_plus,Gamma_minus
+    integer :: ll, mm, nn
+    integer :: ii, j, k, ss
+    integer :: q(3), qprime(3), qdprime(3)
+    integer :: Index_N(0:(Ngrid(1)-1),0:(Ngrid(2)-1),0:(Ngrid(3)-1))
+    integer :: iii, jjj, kkk
+    integer(kind=long) :: plus_offset, minus_offset
+
+    real(kind=sp), allocatable :: energy_sp(:,:), velocity_sp(:,:,:)
+    real(kind=sp), allocatable :: WP3_plus_sp(:,:), WP3_minus_sp(:,:)
+    real(kind=sp), allocatable :: rate_scatt_plus_sp(:,:), rate_scatt_minus_sp(:,:)
+    real(kind=sp) :: omega_sp, omegap_sp, omegadp_sp
+    real(kind=sp) :: sigma_sp, delta_sp
+    real(kind=sp) :: fBEprime_sp, fBEdprime_sp
+    real(kind=sp) :: vel_diff_sp(3)
+    real(kind=sp) :: WP3_local_sp, Gamma_plus_sp, Gamma_minus_sp, Vp_sp
+    real(kind=sp) :: hbar_sp, Kb_sp, T_sp, hbarp_sp, pi_sp, sqrt_pi_sp, nptk_sp
+    real(kind=sp), parameter :: one_sp = 1.0_sp, two_sp = 2.0_sp
+    real(kind=sp), parameter :: half_sp = 0.5_sp, four_sp = 4.0_sp
+    real(kind=sp), parameter :: five_point_six_zero_sp = 5.60626442_sp
+    real(kind=sp), parameter :: one_eight_sp = 1.0e8_sp
 
     rate_scatt=0.0_dp
     WP3_plus=0.0_dp
     WP3_minus=0.0_dp
+    rate_scatt_plus=0.0_dp
+    rate_scatt_minus=0.0_dp
+
+    allocate(energy_sp(nbands,nptk))
+    allocate(velocity_sp(3,nbands,nptk))
+    allocate(WP3_plus_sp(nbands,nlist), WP3_minus_sp(nbands,nlist))
+    allocate(rate_scatt_plus_sp(nbands,nlist), rate_scatt_minus_sp(nbands,nlist))
+
+    energy_sp   = real(energy, kind=sp)
+    velocity_sp = real(velocity, kind=sp)
+    WP3_plus_sp = 0.0_sp
+    WP3_minus_sp = 0.0_sp
+    rate_scatt_plus_sp = 0.0_sp
+    rate_scatt_minus_sp = 0.0_sp
+
+    hbar_sp    = real(hbar,  kind=sp)
+    Kb_sp      = real(Kb,    kind=sp)
+    T_sp       = real(T,     kind=sp)
+    hbarp_sp   = real(hbarp, kind=sp)
+    pi_sp      = real(pi,    kind=sp)
+    sqrt_pi_sp = sqrt(pi_sp)
+    nptk_sp    = real(nptk,  kind=sp)
+
+    do iii=0, Ngrid(1)-1
+       do jjj=0, Ngrid(2)-1
+          do kkk=0, Ngrid(3)-1
+             Index_N(iii,jjj,kkk) = (kkk*Ngrid(2)+jjj)*Ngrid(1)+iii+1
+          end do
+       end do
+    end do
 
     !$OMP PARALLEL DO default(none) schedule(dynamic,1) shared(Nbands,NList,myid,nstates) &
-    !$OMP & shared(energy,velocity,List,IJK,Naccum_plus_array,Naccum_minus_array,omega_max) &
-    !$OMP & shared(WP3_plus,WP3_minus,rate_scatt_plus,rate_scatt_minus) &
-    !$OMP & private(nn,mm,i,ll,Gamma_plus,Gamma_minus,q)
+    !$OMP & shared(energy_sp,velocity_sp,List,IJK,Naccum_plus_array,Naccum_minus_array,omega_max) &
+    !$OMP & shared(WP3_plus_sp,WP3_minus_sp,rate_scatt_plus_sp,rate_scatt_minus_sp,Index_N) &
+    !$OMP & shared(Vp_plus_matrix,Vp_minus_matrix,scalebroad,onlyharmonic,Ngrid) &
+    !$OMP & private(nn,mm,i,ll,q,plus_offset,minus_offset,omega_sp,ii,j,k,qprime,qdprime,ss,omegap_sp,omegadp_sp) &
+    !$OMP & private(fBEprime_sp,fBEdprime_sp,vel_diff_sp,sigma_sp,delta_sp,WP3_local_sp,Gamma_plus_sp,Gamma_minus_sp,Vp_sp)
     do nn=1,nstates
        mm=myid*nstates+nn
        if (mm.gt.nlist*nbands) cycle
        i=modulo(mm-1,Nbands)+1
        ll=int((mm-1)/Nbands)+1
        q=IJK(:,list(ll))
-       if (energy(i,List(ll)).le.omega_max) then
-          call RTA_plus(nn,q,energy(i,List(ll)),energy,velocity,IJK,&
-               Gamma_plus,WP3_plus(i,ll))
-          rate_scatt_plus(i,ll)=Gamma_plus
-          call RTA_minus(nn,q,energy(i,List(ll)),energy,velocity,IJK,&
-               Gamma_minus,WP3_minus(i,ll))
-          rate_scatt_minus(i,ll)=Gamma_minus*0.5_dp
+
+       omega_sp = energy_sp(i,List(ll))
+       if ((omega_sp .ne. 0.0_sp) .and. (real(omega_sp,kind=dp).le.omega_max)) then
+          Gamma_plus_sp = 0.0_sp
+          Gamma_minus_sp = 0.0_sp
+          WP3_plus_sp(i,ll) = 0.0_sp
+          WP3_minus_sp(i,ll) = 0.0_sp
+          plus_offset = Naccum_plus_array(nn)
+          minus_offset = Naccum_minus_array(nn)
+
+          do ii=1,nptk
+             qprime=IJK(:,ii)
+
+             qdprime=q+qprime
+             qdprime=modulo(qdprime,Ngrid)
+             ss=Index_N(qdprime(1),qdprime(2),qdprime(3))
+             do j=1,Nbands
+                omegap_sp=energy_sp(j,ii)
+                if (omegap_sp .eq. 0.0_sp) cycle
+                fBEprime_sp=one_sp/(exp(hbar_sp*omegap_sp/(Kb_sp*T_sp))-one_sp)
+
+                do k=1,Nbands
+                   omegadp_sp=energy_sp(k,ss)
+                   if (omegadp_sp .eq. 0.0_sp) cycle
+                   vel_diff_sp(:)=velocity_sp(:,j,ii)-velocity_sp(:,k,ss)
+                   sigma_sp=real(scalebroad,kind=sp)*base_sigma_sp(vel_diff_sp(1),vel_diff_sp(2),vel_diff_sp(3))
+                   if (sigma_sp .le. 0.0_sp) cycle
+                   delta_sp=omega_sp+omegap_sp-omegadp_sp
+                   if(abs(delta_sp).le.(two_sp*sigma_sp)) then
+                      plus_offset = plus_offset + 1_long
+                      fBEdprime_sp=one_sp/(exp(hbar_sp*omegadp_sp/(Kb_sp*T_sp))-one_sp)
+                      WP3_local_sp=(fBEprime_sp-fBEdprime_sp)* &
+                           exp(-(delta_sp*delta_sp)/(sigma_sp*sigma_sp))/ &
+                           (sigma_sp*sqrt_pi_sp*omega_sp*omegap_sp*omegadp_sp)
+                      WP3_plus_sp(i,ll)=WP3_plus_sp(i,ll)+WP3_local_sp
+                      if (.not.onlyharmonic) then
+                         Vp_sp=real(Vp_plus_matrix(plus_offset),kind=sp)
+                         Gamma_plus_sp=Gamma_plus_sp+ hbarp_sp*pi_sp/four_sp*WP3_local_sp*Vp_sp*Vp_sp
+                      end if
+                   end if
+                end do
+             end do
+
+             qdprime=q-qprime
+             qdprime=modulo(qdprime,Ngrid)
+             ss=Index_N(qdprime(1),qdprime(2),qdprime(3))
+             do j=1,Nbands
+                omegap_sp=energy_sp(j,ii)
+                if (omegap_sp .eq. 0.0_sp) cycle
+                fBEprime_sp=one_sp/(exp(hbar_sp*omegap_sp/(Kb_sp*T_sp))-one_sp)
+
+                do k=1,Nbands
+                   omegadp_sp=energy_sp(k,ss)
+                   if (omegadp_sp .eq. 0.0_sp) cycle
+                   vel_diff_sp(:)=velocity_sp(:,j,ii)-velocity_sp(:,k,ss)
+                   sigma_sp=real(scalebroad,kind=sp)*base_sigma_sp(vel_diff_sp(1),vel_diff_sp(2),vel_diff_sp(3))
+                   if (sigma_sp .le. 0.0_sp) cycle
+                   delta_sp=omega_sp-omegap_sp-omegadp_sp
+                   if(abs(delta_sp).le.(two_sp*sigma_sp)) then
+                      minus_offset = minus_offset + 1_long
+                      fBEdprime_sp=one_sp/(exp(hbar_sp*omegadp_sp/(Kb_sp*T_sp))-one_sp)
+                      WP3_local_sp=(fBEprime_sp+fBEdprime_sp+one_sp)* &
+                           exp(-(delta_sp*delta_sp)/(sigma_sp*sigma_sp))/ &
+                           (sigma_sp*sqrt_pi_sp*omega_sp*omegap_sp*omegadp_sp)
+                      WP3_minus_sp(i,ll)=WP3_minus_sp(i,ll)+WP3_local_sp
+                      if (.not.onlyharmonic) then
+                         Vp_sp=real(Vp_minus_matrix(minus_offset),kind=sp)
+                         Gamma_minus_sp=Gamma_minus_sp+hbarp_sp*pi_sp/four_sp*WP3_local_sp*Vp_sp*Vp_sp
+                      end if
+                   end if
+                end do
+             end do
+          end do
+          rate_scatt_plus_sp(i,ll)=Gamma_plus_sp*five_point_six_zero_sp*one_eight_sp/nptk_sp
+          rate_scatt_minus_sp(i,ll)=Gamma_minus_sp*five_point_six_zero_sp*one_eight_sp/nptk_sp*half_sp
+          WP3_plus_sp(i,ll)=WP3_plus_sp(i,ll)/nptk_sp
+          WP3_minus_sp(i,ll)=WP3_minus_sp(i,ll)*half_sp/nptk_sp
        endif
     end do
     !$OMP END PARALLEL DO
+
+    rate_scatt_plus = real(rate_scatt_plus_sp, kind=dp)
+    rate_scatt_minus = real(rate_scatt_minus_sp, kind=dp)
+    WP3_plus = real(WP3_plus_sp, kind=dp)
+    WP3_minus = real(WP3_minus_sp, kind=dp)
 
     call MPI_ALLREDUCE(MPI_IN_PLACE,rate_scatt_plus,Nbands*Nlist,&
          MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,mm)
@@ -1165,6 +1289,9 @@ end subroutine NP_driver
     call MPI_ALLREDUCE(MPI_IN_PLACE,WP3_minus,Nbands*Nlist,&
          MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,mm)
     rate_scatt=rate_scatt_plus+rate_scatt_minus
+
+    deallocate(energy_sp,velocity_sp,WP3_plus_sp,WP3_minus_sp)
+    deallocate(rate_scatt_plus_sp,rate_scatt_minus_sp)
   end subroutine RTA_driver
 
   subroutine free_cached_event_lists()
