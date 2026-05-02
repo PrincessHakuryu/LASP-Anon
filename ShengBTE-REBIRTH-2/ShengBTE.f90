@@ -37,6 +37,7 @@ program ShengBTE
   use integrals
   use mpi
   use openacc
+  use, intrinsic :: ieee_arithmetic
   implicit none
 
   real(kind=dp) :: kappa_sg(3,3),kappa_old(3,3),relchange
@@ -725,10 +726,26 @@ program ShengBTE
             if (myid.eq.0) write(*,'(A)') " iteration is done on GPU"
          end if
 
+         if (myid.eq.0) then
+            if (.not. ieee_is_finite(sum(energy)))   write(*,*) "DEBUG_NAN_INPUT: energy has non-finite before iteration loop"
+            if (.not. ieee_is_finite(sum(velocity))) write(*,*) "DEBUG_NAN_INPUT: velocity has non-finite before iteration loop"
+            if (.not. ieee_is_finite(sum(tau_zero))) write(*,*) "DEBUG_NAN_INPUT: tau_zero has non-finite before iteration loop"
+            if (.not. ieee_is_finite(sum(Gamma_plus)))  write(*,*) "DEBUG_NAN_INPUT: Gamma_plus has non-finite before iteration loop"
+            if (.not. ieee_is_finite(sum(Gamma_minus))) write(*,*) "DEBUG_NAN_INPUT: Gamma_minus has non-finite before iteration loop"
+            if (.not. ieee_is_finite(sum(F_n)))      write(*,*) "DEBUG_NAN_INPUT: F_n(initial) has non-finite before iteration loop"
+         end if
+
 
 
          do ii=1,maxiter
             F_old = F_n
+            if (myid.eq.0 .and. ii.eq.1) then
+               if (.not. ieee_is_finite(sum(F_old))) then
+                  write(*,*) "DEBUG_STEP01: F_old(step0 result) is non-finite before first iteration call"
+               else
+                  write(*,*) "DEBUG_STEP01: F_old(step0 result) is finite before first iteration call"
+               end if
+            end if
             if (itergpu == .false.) then
                call iteration(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
                               energy,velocity,tau_zero,F_n)
@@ -743,6 +760,19 @@ program ShengBTE
                end do
 
                R_new = F_n - F_old
+               if (.not. ieee_is_finite(sum(F_n))) then
+                  write(*,*) "ERROR: Non-finite F_n detected right after iteration step, ii=",ii
+                  write(*,*) "DEBUG: max|F_old|=",maxval(abs(F_old))," max|F_n|=",maxval(abs(F_n))
+                  if (.not. ieee_is_finite(sum(F_old))) then
+                     write(*,*) "DEBUG_STEP: F_old is already non-finite before iteration update"
+                  else
+                     write(*,*) "DEBUG_STEP: F_old finite, NaN introduced by iteration mapping/scattering accumulation"
+                  end if
+                  if (.not. ieee_is_finite(sum(tau_zero))) write(*,*) "DEBUG_STEP: tau_zero non-finite during NaN event"
+                  if (.not. ieee_is_finite(sum(Gamma_plus))) write(*,*) "DEBUG_STEP: Gamma_plus non-finite during NaN event"
+                  if (.not. ieee_is_finite(sum(Gamma_minus))) write(*,*) "DEBUG_STEP: Gamma_minus non-finite during NaN event"
+                  call MPI_ABORT(MPI_COMM_WORLD, 911, ierr)
+               end if
             
 
                ! 更新历史
@@ -817,7 +847,18 @@ program ShengBTE
                flush(2002)
                write(2003,"(I9,E20.10)") ii, sum(sum(ThConductivity,dim=3),reshape((/((i==j,i=1,3),j=1,3)/),(/3,3/)))/3.0_dp
                flush(2003)
-               relchange=twonorm3x3(sum(ThConductivity,dim=3)-kappa_old)/twonorm3x3(kappa_old)
+               if (.not. ieee_is_finite(sum(ThConductivity))) then
+                  write(*,*) "ERROR: Non-finite ThConductivity detected, ii=",ii
+                  write(*,*) "DEBUG: max|F_n|=",maxval(abs(F_n))," max|R_new|=",maxval(abs(R_new))
+                  call MPI_ABORT(MPI_COMM_WORLD, 912, ierr)
+               end if
+               denom = twonorm3x3(kappa_old)
+               if (denom .gt. 0.0_dp) then
+                  relchange=twonorm3x3(sum(ThConductivity,dim=3)-kappa_old)/denom
+               else
+                  relchange=huge(1.0_dp)
+                  write(*,*) "WARN: kappa_old norm is zero at iteration ",ii,", forcing relchange=huge"
+               end if
 
                write(*,'(A,I0,10X,A,F0.3,A)') " Info: Iteration : ",ii,"Timer : ", MPI_Wtime() - start_time," seconds"
                write(*,*) "Info: Relative change =",relchange

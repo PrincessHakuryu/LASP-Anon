@@ -520,13 +520,14 @@ subroutine Ind_driver( energy,velocity,Nlist,List,IJK,N_plus,N_minus, Naccum_plu
 
   !---------------- locals ----------------
   real(kind=sp), allocatable :: energy_sp(:,:), velocity_sp(:,:,:)
-  integer :: nn, mm, i, ll
+  integer :: nn, mm, i, ll, ierr
   integer :: ii, j, k, ss
   integer :: kp, ib, kp_ev
   integer(kind=long) :: base_plus, base_minus
   integer(kind=long) :: nloc_plus, nloc_minus
   integer(kind=long) :: e, idx
   integer(kind=long) :: totalp, totalm
+  integer(kind=long) :: plus_zeroed_count, minus_zeroed_count
 
   real(kind=sp) :: omega_sp, omegap_sp, omegadp_sp
   real(kind=sp) :: fBEprime_sp, fBEdprime_sp
@@ -597,6 +598,8 @@ subroutine Ind_driver( energy,velocity,Nlist,List,IJK,N_plus,N_minus, Naccum_plu
 
   if (plus_count  > 0_long) Gamma_plus (:) = 0.0_dp
   if (minus_count > 0_long) Gamma_minus(:) = 0.0_dp
+  plus_zeroed_count  = 0_long
+  minus_zeroed_count = 0_long
 
   !================ OpenACC: 仅并行化两个大事件循环 ================
   !$acc data                                                                                                        &
@@ -609,7 +612,8 @@ subroutine Ind_driver( energy,velocity,Nlist,List,IJK,N_plus,N_minus, Naccum_plu
   !$acc& copyout(WP3_plus_sp_total(1:plus_count), WP3_minus_sp_total(1:minus_count),                                &
   !$acc&         Gamma_plus(1:plus_count), Gamma_minus(1:minus_count),                                              &
   !$acc&         Indof2ndPhonon_plus(1:plus_count), Indof3rdPhonon_plus(1:plus_count),                              &
-  !$acc&         Indof2ndPhonon_minus(1:minus_count), Indof3rdPhonon_minus(1:minus_count))
+  !$acc&         Indof2ndPhonon_minus(1:minus_count), Indof3rdPhonon_minus(1:minus_count))                          &
+  !$acc& copy(plus_zeroed_count, minus_zeroed_count)
 
     ! plus events
     !$acc parallel loop gang vector present(energy_sp,velocity_sp,plus_i,plus_kp,plus_ii,plus_j,plus_k,plus_ss,      &
@@ -638,12 +642,14 @@ subroutine Ind_driver( energy,velocity,Nlist,List,IJK,N_plus,N_minus, Naccum_plu
       delta_sp = omega_sp + omegap_sp - omegadp_sp
       Vp_sp = real(Vp_plus_matrix(idx), kind=sp)
 
-      if (sigma_sp <= 0.0_sp) then
+      if (sigma_sp <= 0.0_sp .or. abs(omega_sp)<=1.0e-12_sp .or. abs(omegap_sp)<=1.0e-12_sp .or. abs(omegadp_sp)<=1.0e-12_sp) then
          ! Keep indexing intact, but kill the singular event contribution
          ! Be careful!! FP32 would cause sigma_sp=0 more often in extreme situations than FP64.... 
          ! GUGUGAGA!!
          WP3_sp        = 0.0_sp
          gamma_plus_sp = 0.0_sp
+         !$acc atomic update
+         plus_zeroed_count = plus_zeroed_count + 1_long
       else
          WP3_sp = (fBEprime_sp - fBEdprime_sp) * &
                   exp(-(delta_sp*delta_sp)/(sigma_sp*sigma_sp)) / &
@@ -687,9 +693,11 @@ subroutine Ind_driver( energy,velocity,Nlist,List,IJK,N_plus,N_minus, Naccum_plu
       delta_sp = omega_sp - omegap_sp - omegadp_sp
       Vp_sp = real(Vp_minus_matrix(idx), kind=sp)
 
-      if (sigma_sp <= 0.0_sp) then
+      if (sigma_sp <= 0.0_sp .or. abs(omega_sp)<=1.0e-12_sp .or. abs(omegap_sp)<=1.0e-12_sp .or. abs(omegadp_sp)<=1.0e-12_sp) then
          WP3_sp         = 0.0_sp
          gamma_minus_sp = 0.0_sp
+         !$acc atomic update
+         minus_zeroed_count = minus_zeroed_count + 1_long
       else
          WP3_sp = (fBEprime_sp + fBEdprime_sp + one_sp) * &
                   exp(-(delta_sp*delta_sp)/(sigma_sp*sigma_sp)) / &
@@ -710,6 +718,12 @@ subroutine Ind_driver( energy,velocity,Nlist,List,IJK,N_plus,N_minus, Naccum_plu
     end do
   !$acc end data
   !================ OpenACC: 结束并行区 ===============================
+  call MPI_ALLREDUCE(MPI_IN_PLACE, plus_zeroed_count, 1, MPI_INTEGER8, MPI_SUM, MPI_COMM_WORLD, ierr)
+  call MPI_ALLREDUCE(MPI_IN_PLACE, minus_zeroed_count, 1, MPI_INTEGER8, MPI_SUM, MPI_COMM_WORLD, ierr)
+  if (myid == 0) then
+    write(*,*) "DEBUG_GAMMA_GUARD: zeroed plus events =", plus_zeroed_count
+    write(*,*) "DEBUG_GAMMA_GUARD: zeroed minus events=", minus_zeroed_count
+  end if
   if (myid == 0) write(*,'(A,F0.3,A)') " Info: GPU done,starting scattering results on CPU at ", MPI_Wtime()-start_time, " s"
  
   !---------------- phase 2: scatter (segment sum by counts/offsets) ----------------
@@ -920,7 +934,7 @@ subroutine NP_driver(energy,velocity,Nlist,List,IJK, &
                   dvz = velocity_sp(3, j, ii) - velocity_sp(3, k, ss_p)
                   sigma_sp = scalebroad_sp * base_sigma_sp(dvx,dvy,dvz)
                   delta_sp = omega_sp + omegap_sp - omegadp_sp
-                  if (abs(delta_sp) .le. (2.0_sp*sigma_sp)) then
+                  if ((sigma_sp .gt. 0.0_sp) .and. (abs(delta_sp) .le. (2.0_sp*sigma_sp))) then
                     !$acc atomic update
                     N_plus(mm) = N_plus(mm) + 1
                     contrib_sp = exp( - (delta_sp*delta_sp) / (sigma_sp*sigma_sp) ) * (inv_norm_sp / sigma_sp)
@@ -935,7 +949,7 @@ subroutine NP_driver(energy,velocity,Nlist,List,IJK, &
                   dvz = velocity_sp(3, j, ii) - velocity_sp(3, k, ss_m)
                   sigma_sp = scalebroad_sp * base_sigma_sp(dvx,dvy,dvz)
                   delta_sp = omega_sp - omegap_sp - omegadp_sp
-                  if (abs(delta_sp) .le. (2.0_sp*sigma_sp)) then
+                  if ((sigma_sp .gt. 0.0_sp) .and. (abs(delta_sp) .le. (2.0_sp*sigma_sp))) then
                       !$acc atomic update
                       N_minus(mm) = N_minus(mm) + 1
                       contrib_sp = exp( - (delta_sp*delta_sp) / (sigma_sp*sigma_sp) ) * (inv_norm_sp / sigma_sp)
