@@ -229,7 +229,9 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
     integer, allocatable :: TypeofSymmetry_safe(:,:), ALLEquiList_safe(:,:)
     integer :: finite_local, finite_global
     real(kind=dp) :: deltaf_absmax_local, deltaf_absmax_global
-    integer :: c_bad, i_bad, q_bad
+    integer :: c_bad, i_bad, q_bad, dbg_state, dbg_kk, dbg_jj
+    real(kind=sp) :: dbg_term
+    logical :: dbg_found
 
     !---------------- 主机端：一次性分配/构建 或 当规模变化时重建 ----------------
     if (.not. host_inited .or. saved_nbands/=Nbands .or. saved_nptk/=nptk .or.  &
@@ -478,6 +480,58 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
       end do
       write(*,*) "ERROR_ITERGPU: rank",myid," local DeltaF_sp non-finite at (c,i,q)=",&
                  c_bad,i_bad,q_bad," value=",DeltaF_sp(c_bad,i_bad,q_bad)
+      dbg_found = .false.
+      do dbg_state = 1, nstates
+        mmm = myid*nstates + dbg_state
+        if (mmm <= Nlist*Nbands) then
+          i  = modulo(mmm-1,Nbands) + 1
+          ll = int((mmm-1)/Nbands) + 1
+          if (i /= i_bad) cycle
+          do dbg_kk = 1, Nequi(ll)
+            if (ALLEquiList_safe(dbg_kk,ll) /= q_bad) cycle
+            sym_idx = TypeofSymmetry_safe(dbg_kk,ll)
+            Naccum_plus  = Naccum_plus_array(dbg_state)
+            Naccum_minus = Naccum_minus_array(dbg_state)
+            do dbg_jj = 1, N_plus(mmm)
+              j  = modulo(Indof2ndPhonon_plus(Naccum_plus+dbg_jj)-1, Nbands) + 1
+              mm = int((Indof2ndPhonon_plus(Naccum_plus+dbg_jj)-1)/Nbands) + 1
+              k  = modulo(Indof3rdPhonon_plus(Naccum_plus+dbg_jj)-1, Nbands) + 1
+              nn = int((Indof3rdPhonon_plus(Naccum_plus+dbg_jj)-1)/Nbands) + 1
+              if (mm<1 .or. mm>nptk .or. nn<1 .or. nn>nptk) then
+                write(*,*) "DEBUG_TERM: invalid mm/nn in plus",mm,nn," at state/jj=",dbg_state,dbg_jj
+                dbg_found = .true.; exit
+              end if
+              idx_sym_k = ID_equi(sym_idx, nn); idx_sym_j = ID_equi(sym_idx, mm)
+              dbg_term = Gamma_plus_sp(Naccum_plus+dbg_jj) * ( F_sp(c_bad,k,idx_sym_k) - F_sp(c_bad,j,idx_sym_j) )
+              if (.not. ieee_is_finite(dbg_term)) then
+                write(*,*) "DEBUG_TERM: non-finite PLUS term at state/kk/jj=",dbg_state,dbg_kk,dbg_jj
+                write(*,*) "DEBUG_TERM: sym,mm,nn,idxj,idxk=",sym_idx,mm,nn,idx_sym_j,idx_sym_k
+                dbg_found = .true.; exit
+              end if
+            end do
+            if (dbg_found) exit
+            do dbg_jj = 1, N_minus(mmm)
+              j  = modulo(Indof2ndPhonon_minus(Naccum_minus+dbg_jj)-1, Nbands) + 1
+              mm = int((Indof2ndPhonon_minus(Naccum_minus+dbg_jj)-1)/Nbands) + 1
+              k  = modulo(Indof3rdPhonon_minus(Naccum_minus+dbg_jj)-1, Nbands) + 1
+              nn = int((Indof3rdPhonon_minus(Naccum_minus+dbg_jj)-1)/Nbands) + 1
+              if (mm<1 .or. mm>nptk .or. nn<1 .or. nn>nptk) then
+                write(*,*) "DEBUG_TERM: invalid mm/nn in minus",mm,nn," at state/jj=",dbg_state,dbg_jj
+                dbg_found = .true.; exit
+              end if
+              idx_sym_k = ID_equi(sym_idx, nn); idx_sym_j = ID_equi(sym_idx, mm)
+              dbg_term = 0.5_sp*Gamma_minus_sp(Naccum_minus+dbg_jj) * ( F_sp(c_bad,k,idx_sym_k) + F_sp(c_bad,j,idx_sym_j) )
+              if (.not. ieee_is_finite(dbg_term)) then
+                write(*,*) "DEBUG_TERM: non-finite MINUS term at state/kk/jj=",dbg_state,dbg_kk,dbg_jj
+                write(*,*) "DEBUG_TERM: sym,mm,nn,idxj,idxk=",sym_idx,mm,nn,idx_sym_j,idx_sym_k
+                dbg_found = .true.; exit
+              end if
+            end do
+            if (dbg_found) exit
+          end do
+        end if
+        if (dbg_found) exit
+      end do
     end if
     if (myid.eq.0) then
       if (.not. ieee_is_finite(sum(DeltaF_sp))) then
