@@ -27,6 +27,7 @@ module iterations
   use config
   use wedgetc
   use mpi
+  use, intrinsic :: ieee_arithmetic
   implicit none
 !================ 持久化（仅主机端） ================
   logical :: host_inited    = .false.
@@ -37,6 +38,7 @@ module iterations
   integer :: IsoN_saved     = 0
   integer :: sz_Gp_saved    = 0
   integer :: sz_Gm_saved    = 0
+  logical :: itergpu_debug_header_printed = .false.
 
   
 
@@ -221,8 +223,9 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
 
     ! 局部量
     integer(kind=long) :: Naccum_plus, Naccum_minus
-    integer :: i,j,k,jj,kk,ll,mm,nn,mmm,nnn,c,q_idx,idx_sym_j,idx_sym_k
+    integer :: i,j,k,jj,kk,ll,mm,nn,mmm,nnn,c,q_idx,idx_sym_j,idx_sym_k,sym_idx
     integer :: ierr, Nequi_max, IsoN, N_plus_max, N_minus_max
+    integer :: bad_map_count
 
     !---------------- 主机端：一次性分配/构建 或 当规模变化时重建 ----------------
     if (.not. host_inited .or. saved_nbands/=Nbands .or. saved_nptk/=nptk .or.  &
@@ -284,6 +287,18 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
     Nequi_max   = maxval(Nequi)
     N_plus_max  = maxval(N_plus)
     N_minus_max = maxval(N_minus)
+    bad_map_count = 0
+
+    if (myid.eq.0 .and. .not. itergpu_debug_header_printed) then
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(TypeofSymmetry)=",minval(TypeofSymmetry),maxval(TypeofSymmetry)
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(ID_equi)=",minval(ID_equi),maxval(ID_equi)
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(ALLEquiList)=",minval(ALLEquiList),maxval(ALLEquiList)
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(N_plus,N_minus)=",minval(N_plus),maxval(N_plus),minval(N_minus),maxval(N_minus)
+      write(*,*) "DEBUG_ITERGPU_INPUT: finite(Gamma_plus_sp,Gamma_minus_sp,tau_zero_sp,F_sp)=", &
+           ieee_is_finite(sum(Gamma_plus_sp)), ieee_is_finite(sum(Gamma_minus_sp)), &
+           ieee_is_finite(sum(tau_zero_sp)), ieee_is_finite(sum(F_sp))
+      itergpu_debug_header_printed = .true.
+    end if
 
     ! if (myid.eq.0) write(*,'(A,4(I0,1X))') " Info: dims Nequi_max nstates N+max N-max = ", &
     !                                        Nequi_max, nstates, N_plus_max, N_minus_max
@@ -320,7 +335,12 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
           ll = int((mmm-1)/Nbands) + 1
 
           if (kk <= Nequi(ll)) then
+            sym_idx = TypeofSymmetry(kk,ll)
             q_idx = ALLEquiList(kk,ll)
+            if (q_idx < 1 .or. q_idx > nptk .or. sym_idx < 1 .or. sym_idx > Nsymm_rot) then
+              bad_map_count = bad_map_count + 1
+              cycle
+            end if
             Naccum_plus  = Naccum_plus_array(nnn)
             Naccum_minus = Naccum_minus_array(nnn)
 
@@ -333,8 +353,9 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
                 k  = modulo(Indof3rdPhonon_plus(Naccum_plus+jj)-1, Nbands) + 1
                 nn = int((Indof3rdPhonon_plus(Naccum_plus+jj)-1)/Nbands) + 1
 
-                idx_sym_k = ID_equi(TypeofSymmetry(kk,ll), nn)
-                idx_sym_j = ID_equi(TypeofSymmetry(kk,ll), mm)
+                idx_sym_k = ID_equi(sym_idx, nn)
+                idx_sym_j = ID_equi(sym_idx, mm)
+                if (idx_sym_k < 1 .or. idx_sym_k > nptk .or. idx_sym_j < 1 .or. idx_sym_j > nptk) cycle
                 !$acc loop seq
                 do c = 1, 3
                   !$acc atomic update
@@ -353,8 +374,9 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
                 k  = modulo(Indof3rdPhonon_minus(Naccum_minus+jj)-1, Nbands) + 1
                 nn = int((Indof3rdPhonon_minus(Naccum_minus+jj)-1)/Nbands) + 1
 
-                idx_sym_k = ID_equi(TypeofSymmetry(kk,ll), nn)
-                idx_sym_j = ID_equi(TypeofSymmetry(kk,ll), mm)
+                idx_sym_k = ID_equi(sym_idx, nn)
+                idx_sym_j = ID_equi(sym_idx, mm)
+                if (idx_sym_k < 1 .or. idx_sym_k > nptk .or. idx_sym_j < 1 .or. idx_sym_j > nptk) cycle
                 !$acc loop seq
                 do c = 1, 3
                   !$acc atomic update
@@ -386,7 +408,10 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
             kk = int((Iso_Ind2(jj)-1)/Nbands) + 1
 
             q_idx     = ALLEquiList(nn, ll)
-            idx_sym_k = ID_equi(TypeofSymmetry(nn, ll), kk)
+            sym_idx = TypeofSymmetry(nn,ll)
+            if (q_idx < 1 .or. q_idx > nptk .or. sym_idx < 1 .or. sym_idx > Nsymm_rot) cycle
+            idx_sym_k = ID_equi(sym_idx, kk)
+            if (idx_sym_k < 1 .or. idx_sym_k > nptk) cycle
 
             do c = 1, 3
               !$acc atomic update
@@ -400,8 +425,23 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
     end if
 
     !$acc update self(DeltaF_sp)
+    call MPI_ALLREDUCE(MPI_IN_PLACE,bad_map_count,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,ierr)
+    if (myid.eq.0 .and. bad_map_count.gt.0) then
+      write(*,*) "WARN_ITERGPU: skipped invalid symmetry/list mappings =",bad_map_count
+    end if
+    if (myid.eq.0) then
+      if (.not. ieee_is_finite(sum(DeltaF_sp))) then
+        write(*,*) "ERROR_ITERGPU: DeltaF_sp becomes non-finite before MPI_ALLREDUCE"
+        write(*,*) "DEBUG_ITERGPU: max|DeltaF_sp|=", maxval(abs(DeltaF_sp))
+      end if
+    end if
     call MPI_BARRIER(MPI_COMM_WORLD, ierr)
     call MPI_ALLREDUCE(MPI_IN_PLACE, DeltaF_sp, nptk*Nbands*3, MPI_REAL, MPI_SUM, MPI_COMM_WORLD, ierr)
+    if (myid.eq.0) then
+      if (.not. ieee_is_finite(sum(DeltaF_sp))) then
+        write(*,*) "ERROR_ITERGPU: DeltaF_sp non-finite after MPI_ALLREDUCE"
+      end if
+    end if
     !$acc update device(DeltaF_sp)
 
     !$acc parallel loop gang collapse(3)                                      &
@@ -421,6 +461,13 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
       end do
     end do
     !$acc end parallel
+    !$acc update self(F_sp)
+    if (myid.eq.0) then
+      if (.not. ieee_is_finite(sum(F_sp))) then
+        write(*,*) "ERROR_ITERGPU: F_sp non-finite right after F update kernel"
+        write(*,*) "DEBUG_ITERGPU: max|tau_zero_sp|=", maxval(abs(tau_zero_sp)), " max|DeltaF_sp|=", maxval(abs(DeltaF_sp))
+      end if
+    end if
 
     if (IsoN > 0) then
       !$acc exit data delete(Iso_Ind1, Iso_Ind2, Gamma_iso_sp)
