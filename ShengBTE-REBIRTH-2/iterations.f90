@@ -27,6 +27,7 @@ module iterations
   use config
   use wedgetc
   use mpi
+  use, intrinsic :: ieee_arithmetic
   implicit none
 !================ 持久化（仅主机端） ================
   logical :: host_inited    = .false.
@@ -37,6 +38,7 @@ module iterations
   integer :: IsoN_saved     = 0
   integer :: sz_Gp_saved    = 0
   integer :: sz_Gm_saved    = 0
+  logical :: itergpu_debug_header_printed = .false.
 
   
 
@@ -221,8 +223,15 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
 
     ! 局部量
     integer(kind=long) :: Naccum_plus, Naccum_minus
-    integer :: i,j,k,jj,kk,ll,mm,nn,mmm,nnn,c,q_idx,idx_sym_j,idx_sym_k
+    integer :: i,j,k,jj,kk,ll,mm,nn,mmm,nnn,c,q_idx,idx_sym_j,idx_sym_k,sym_idx
     integer :: ierr, Nequi_max, IsoN, N_plus_max, N_minus_max
+    integer :: bad_map_count, bad_sym_count, bad_q_count
+    integer, allocatable :: TypeofSymmetry_safe(:,:), ALLEquiList_safe(:,:)
+    integer :: finite_local, finite_global
+    real(kind=dp) :: deltaf_absmax_local, deltaf_absmax_global
+    integer :: c_bad, i_bad, q_bad, dbg_state, dbg_kk, dbg_jj
+    real(kind=sp) :: dbg_term
+    logical :: dbg_found
 
     !---------------- 主机端：一次性分配/构建 或 当规模变化时重建 ----------------
     if (.not. host_inited .or. saved_nbands/=Nbands .or. saved_nptk/=nptk .or.  &
@@ -284,13 +293,48 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
     Nequi_max   = maxval(Nequi)
     N_plus_max  = maxval(N_plus)
     N_minus_max = maxval(N_minus)
+    bad_map_count = 0
+    bad_sym_count = 0
+    bad_q_count   = 0
+    allocate(TypeofSymmetry_safe(size(TypeofSymmetry,1),size(TypeofSymmetry,2)))
+    allocate(ALLEquiList_safe(size(ALLEquiList,1),size(ALLEquiList,2)))
+    TypeofSymmetry_safe = TypeofSymmetry
+    ALLEquiList_safe    = ALLEquiList
+    do ll=1,size(TypeofSymmetry,2)
+      do kk=1,size(TypeofSymmetry,1)
+        if (TypeofSymmetry_safe(kk,ll) < 1 .or. TypeofSymmetry_safe(kk,ll) > Nsymm_rot) then
+          TypeofSymmetry_safe(kk,ll) = 1
+          bad_sym_count = bad_sym_count + 1
+        end if
+        if (ALLEquiList_safe(kk,ll) < 1 .or. ALLEquiList_safe(kk,ll) > nptk) then
+          ALLEquiList_safe(kk,ll) = 1
+          bad_q_count = bad_q_count + 1
+        end if
+      end do
+    end do
+    bad_map_count = bad_sym_count + bad_q_count
+    call MPI_ALLREDUCE(MPI_IN_PLACE,bad_map_count,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,ierr)
+    if (myid.eq.0 .and. bad_map_count.gt.0) then
+      write(*,*) "WARN_ITERGPU: invalid mapping entries detected(sym+q) =",bad_map_count
+    end if
+
+    if (myid.eq.0 .and. .not. itergpu_debug_header_printed) then
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(TypeofSymmetry)=",minval(TypeofSymmetry),maxval(TypeofSymmetry)
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(ID_equi)=",minval(ID_equi),maxval(ID_equi)
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(ALLEquiList)=",minval(ALLEquiList),maxval(ALLEquiList)
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(N_plus,N_minus)=",minval(N_plus),maxval(N_plus),minval(N_minus),maxval(N_minus)
+      write(*,*) "DEBUG_ITERGPU_INPUT: finite(Gamma_plus_sp,Gamma_minus_sp,tau_zero_sp,F_sp)=", &
+           ieee_is_finite(sum(Gamma_plus_sp)), ieee_is_finite(sum(Gamma_minus_sp)), &
+           ieee_is_finite(sum(tau_zero_sp)), ieee_is_finite(sum(F_sp))
+      itergpu_debug_header_printed = .true.
+    end if
 
     ! if (myid.eq.0) write(*,'(A,4(I0,1X))') " Info: dims Nequi_max nstates N+max N-max = ", &
     !                                        Nequi_max, nstates, N_plus_max, N_minus_max
 
     
     !$acc data                                                                 &
-    !$acc& copyin(Nequi, ALLEquiList, TypeofSymmetry, ID_equi)                 &
+    !$acc& copyin(Nequi, ALLEquiList_safe, TypeofSymmetry_safe, ID_equi)                 &
     !$acc& copyin(N_plus, N_minus,                                            &
     !$acc&       Naccum_plus_array, Indof2ndPhonon_plus,                      &
     !$acc&       Indof3rdPhonon_plus, Gamma_plus_sp,                          &
@@ -305,12 +349,12 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
 
 
     !$acc parallel loop gang collapse(2)                                      &
-    !$acc& present(DeltaF_sp,Nequi,ALLEquiList,ID_equi,F_sp,                   &
+    !$acc& present(DeltaF_sp,Nequi,ALLEquiList_safe,ID_equi,F_sp,                   &
     !$acc&         N_plus,N_minus,                                            &
     !$acc&         Naccum_plus_array,Indof2ndPhonon_plus,                      &
     !$acc&         Indof3rdPhonon_plus,Gamma_plus_sp,                          &
     !$acc&         Naccum_minus_array,Indof2ndPhonon_minus,                    &
-    !$acc&         Indof3rdPhonon_minus,Gamma_minus_sp, TypeofSymmetry)
+    !$acc&         Indof3rdPhonon_minus,Gamma_minus_sp, TypeofSymmetry_safe)
     do nnn = 1, nstates
       do kk  = 1, Nequi_max
 
@@ -320,7 +364,12 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
           ll = int((mmm-1)/Nbands) + 1
 
           if (kk <= Nequi(ll)) then
-            q_idx = ALLEquiList(kk,ll)
+            sym_idx = TypeofSymmetry_safe(kk,ll)
+            q_idx = ALLEquiList_safe(kk,ll)
+            if (q_idx < 1 .or. q_idx > nptk .or. sym_idx < 1 .or. sym_idx > Nsymm_rot) then
+              bad_map_count = bad_map_count + 1
+              cycle
+            end if
             Naccum_plus  = Naccum_plus_array(nnn)
             Naccum_minus = Naccum_minus_array(nnn)
 
@@ -333,8 +382,9 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
                 k  = modulo(Indof3rdPhonon_plus(Naccum_plus+jj)-1, Nbands) + 1
                 nn = int((Indof3rdPhonon_plus(Naccum_plus+jj)-1)/Nbands) + 1
 
-                idx_sym_k = ID_equi(TypeofSymmetry(kk,ll), nn)
-                idx_sym_j = ID_equi(TypeofSymmetry(kk,ll), mm)
+                idx_sym_k = ID_equi(sym_idx, nn)
+                idx_sym_j = ID_equi(sym_idx, mm)
+                if (idx_sym_k < 1 .or. idx_sym_k > nptk .or. idx_sym_j < 1 .or. idx_sym_j > nptk) cycle
                 !$acc loop seq
                 do c = 1, 3
                   !$acc atomic update
@@ -353,8 +403,9 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
                 k  = modulo(Indof3rdPhonon_minus(Naccum_minus+jj)-1, Nbands) + 1
                 nn = int((Indof3rdPhonon_minus(Naccum_minus+jj)-1)/Nbands) + 1
 
-                idx_sym_k = ID_equi(TypeofSymmetry(kk,ll), nn)
-                idx_sym_j = ID_equi(TypeofSymmetry(kk,ll), mm)
+                idx_sym_k = ID_equi(sym_idx, nn)
+                idx_sym_j = ID_equi(sym_idx, mm)
+                if (idx_sym_k < 1 .or. idx_sym_k > nptk .or. idx_sym_j < 1 .or. idx_sym_j > nptk) cycle
                 !$acc loop seq
                 do c = 1, 3
                   !$acc atomic update
@@ -373,8 +424,8 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
 
     if (IsoN .ne. 0) then
       !$acc parallel loop gang collapse(2)                                   &
-      !$acc& present(DeltaF_sp, F_sp, ALLEquiList, ID_equi,                  &
-      !$acc&         TypeofSymmetry, Nequi, Iso_Ind1, Iso_Ind2, Gamma_iso_sp)
+      !$acc& present(DeltaF_sp, F_sp, ALLEquiList_safe, ID_equi,                  &
+      !$acc&         TypeofSymmetry_safe, Nequi, Iso_Ind1, Iso_Ind2, Gamma_iso_sp)
       do jj = 1, IsoN
         do nn = 1, Nequi_max
 
@@ -385,8 +436,11 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
             j  = modulo(Iso_Ind2(jj)-1, Nbands) + 1
             kk = int((Iso_Ind2(jj)-1)/Nbands) + 1
 
-            q_idx     = ALLEquiList(nn, ll)
-            idx_sym_k = ID_equi(TypeofSymmetry(nn, ll), kk)
+            q_idx     = ALLEquiList_safe(nn, ll)
+            sym_idx = TypeofSymmetry_safe(nn,ll)
+            if (q_idx < 1 .or. q_idx > nptk .or. sym_idx < 1 .or. sym_idx > Nsymm_rot) cycle
+            idx_sym_k = ID_equi(sym_idx, kk)
+            if (idx_sym_k < 1 .or. idx_sym_k > nptk) cycle
 
             do c = 1, 3
               !$acc atomic update
@@ -400,18 +454,108 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
     end if
 
     !$acc update self(DeltaF_sp)
+    finite_local = merge(1,0,ieee_is_finite(sum(DeltaF_sp)))
+    deltaf_absmax_local = maxval(abs(real(DeltaF_sp,kind=dp)))
+    call MPI_ALLREDUCE(finite_local,finite_global,1,MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,ierr)
+    call MPI_ALLREDUCE(deltaf_absmax_local,deltaf_absmax_global,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,ierr)
+    if (myid.eq.0) then
+      if (finite_global.eq.0) then
+        write(*,*) "ERROR_ITERGPU: at least one rank has non-finite DeltaF_sp before MPI_ALLREDUCE"
+      end if
+      write(*,*) "DEBUG_ITERGPU: global max|DeltaF_sp| before reduce =",deltaf_absmax_global
+    end if
+    if (finite_local.eq.0) then
+      c_bad = -1; i_bad = -1; q_bad = -1
+      do q_idx=1,nptk
+        do i=1,Nbands
+          do c=1,3
+            if (.not. ieee_is_finite(DeltaF_sp(c,i,q_idx))) then
+              c_bad=c; i_bad=i; q_bad=q_idx
+              exit
+            end if
+          end do
+          if (c_bad.gt.0) exit
+        end do
+        if (c_bad.gt.0) exit
+      end do
+      write(*,*) "ERROR_ITERGPU: rank",myid," local DeltaF_sp non-finite at (c,i,q)=",&
+                 c_bad,i_bad,q_bad," value=",DeltaF_sp(c_bad,i_bad,q_bad)
+      dbg_found = .false.
+      do dbg_state = 1, nstates
+        mmm = myid*nstates + dbg_state
+        if (mmm <= Nlist*Nbands) then
+          i  = modulo(mmm-1,Nbands) + 1
+          ll = int((mmm-1)/Nbands) + 1
+          if (i /= i_bad) cycle
+          do dbg_kk = 1, Nequi(ll)
+            if (ALLEquiList_safe(dbg_kk,ll) /= q_bad) cycle
+            sym_idx = TypeofSymmetry_safe(dbg_kk,ll)
+            Naccum_plus  = Naccum_plus_array(dbg_state)
+            Naccum_minus = Naccum_minus_array(dbg_state)
+            do dbg_jj = 1, N_plus(mmm)
+              j  = modulo(Indof2ndPhonon_plus(Naccum_plus+dbg_jj)-1, Nbands) + 1
+              mm = int((Indof2ndPhonon_plus(Naccum_plus+dbg_jj)-1)/Nbands) + 1
+              k  = modulo(Indof3rdPhonon_plus(Naccum_plus+dbg_jj)-1, Nbands) + 1
+              nn = int((Indof3rdPhonon_plus(Naccum_plus+dbg_jj)-1)/Nbands) + 1
+              if (mm<1 .or. mm>nptk .or. nn<1 .or. nn>nptk) then
+                write(*,*) "DEBUG_TERM: invalid mm/nn in plus",mm,nn," at state/jj=",dbg_state,dbg_jj
+                dbg_found = .true.; exit
+              end if
+              idx_sym_k = ID_equi(sym_idx, nn); idx_sym_j = ID_equi(sym_idx, mm)
+              dbg_term = Gamma_plus_sp(Naccum_plus+dbg_jj) * ( F_sp(c_bad,k,idx_sym_k) - F_sp(c_bad,j,idx_sym_j) )
+              if (.not. ieee_is_finite(dbg_term)) then
+                write(*,*) "DEBUG_TERM: non-finite PLUS term at state/kk/jj=",dbg_state,dbg_kk,dbg_jj
+                write(*,*) "DEBUG_TERM: sym,mm,nn,idxj,idxk=",sym_idx,mm,nn,idx_sym_j,idx_sym_k
+                dbg_found = .true.; exit
+              end if
+            end do
+            if (dbg_found) exit
+            do dbg_jj = 1, N_minus(mmm)
+              j  = modulo(Indof2ndPhonon_minus(Naccum_minus+dbg_jj)-1, Nbands) + 1
+              mm = int((Indof2ndPhonon_minus(Naccum_minus+dbg_jj)-1)/Nbands) + 1
+              k  = modulo(Indof3rdPhonon_minus(Naccum_minus+dbg_jj)-1, Nbands) + 1
+              nn = int((Indof3rdPhonon_minus(Naccum_minus+dbg_jj)-1)/Nbands) + 1
+              if (mm<1 .or. mm>nptk .or. nn<1 .or. nn>nptk) then
+                write(*,*) "DEBUG_TERM: invalid mm/nn in minus",mm,nn," at state/jj=",dbg_state,dbg_jj
+                dbg_found = .true.; exit
+              end if
+              idx_sym_k = ID_equi(sym_idx, nn); idx_sym_j = ID_equi(sym_idx, mm)
+              dbg_term = 0.5_sp*Gamma_minus_sp(Naccum_minus+dbg_jj) * ( F_sp(c_bad,k,idx_sym_k) + F_sp(c_bad,j,idx_sym_j) )
+              if (.not. ieee_is_finite(dbg_term)) then
+                write(*,*) "DEBUG_TERM: non-finite MINUS term at state/kk/jj=",dbg_state,dbg_kk,dbg_jj
+                write(*,*) "DEBUG_TERM: sym,mm,nn,idxj,idxk=",sym_idx,mm,nn,idx_sym_j,idx_sym_k
+                dbg_found = .true.; exit
+              end if
+            end do
+            if (dbg_found) exit
+          end do
+        end if
+        if (dbg_found) exit
+      end do
+    end if
+    if (myid.eq.0) then
+      if (.not. ieee_is_finite(sum(DeltaF_sp))) then
+        write(*,*) "ERROR_ITERGPU: DeltaF_sp becomes non-finite before MPI_ALLREDUCE"
+        write(*,*) "DEBUG_ITERGPU: max|DeltaF_sp|=", maxval(abs(DeltaF_sp))
+      end if
+    end if
     call MPI_BARRIER(MPI_COMM_WORLD, ierr)
     call MPI_ALLREDUCE(MPI_IN_PLACE, DeltaF_sp, nptk*Nbands*3, MPI_REAL, MPI_SUM, MPI_COMM_WORLD, ierr)
+    if (myid.eq.0) then
+      if (.not. ieee_is_finite(sum(DeltaF_sp))) then
+        write(*,*) "ERROR_ITERGPU: DeltaF_sp non-finite after MPI_ALLREDUCE"
+      end if
+    end if
     !$acc update device(DeltaF_sp)
 
     !$acc parallel loop gang collapse(3)                                      &
     !$acc& present(F_sp, tau_zero_sp, velocity_sp, omega_sp, DeltaF_sp,        &
-    !$acc&         ALLEquiList, Nequi)
+    !$acc&         ALLEquiList_safe, Nequi)
     do ll = 1, Nlist
       do kk = 1, Nequi_max
         do i = 1, Nbands
           if (kk <= Nequi(ll)) then
-            q_idx = ALLEquiList(kk, ll)
+            q_idx = ALLEquiList_safe(kk, ll)
             do c = 1, 3
               F_sp(c,i,q_idx) = tau_zero_sp(i,ll) * ( velocity_sp(c,i,q_idx) * omega_sp(i,q_idx) + &
                                    DeltaF_sp(c,i,q_idx) )
@@ -421,12 +565,21 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
       end do
     end do
     !$acc end parallel
+    !$acc update self(F_sp)
+    if (myid.eq.0) then
+      if (.not. ieee_is_finite(sum(F_sp))) then
+        write(*,*) "ERROR_ITERGPU: F_sp non-finite right after F update kernel"
+        write(*,*) "DEBUG_ITERGPU: max|tau_zero_sp|=", maxval(abs(tau_zero_sp)), " max|DeltaF_sp|=", maxval(abs(DeltaF_sp))
+      end if
+    end if
 
     if (IsoN > 0) then
       !$acc exit data delete(Iso_Ind1, Iso_Ind2, Gamma_iso_sp)
     end if
 
     !$acc end data
+    if (allocated(TypeofSymmetry_safe)) deallocate(TypeofSymmetry_safe)
+    if (allocated(ALLEquiList_safe)) deallocate(ALLEquiList_safe)
 
     ! 回写双精度接口
     F_n = real(F_sp,kind=dp)
