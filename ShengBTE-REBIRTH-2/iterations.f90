@@ -227,6 +227,9 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
     integer :: ierr, Nequi_max, IsoN, N_plus_max, N_minus_max
     integer :: bad_map_count, bad_sym_count, bad_q_count
     integer, allocatable :: TypeofSymmetry_safe(:,:), ALLEquiList_safe(:,:)
+    integer :: finite_local, finite_global
+    real(kind=dp) :: deltaf_absmax_local, deltaf_absmax_global
+    integer :: c_bad, i_bad, q_bad
 
     !---------------- 主机端：一次性分配/构建 或 当规模变化时重建 ----------------
     if (.not. host_inited .or. saved_nbands/=Nbands .or. saved_nptk/=nptk .or.  &
@@ -449,6 +452,33 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
     end if
 
     !$acc update self(DeltaF_sp)
+    finite_local = merge(1,0,ieee_is_finite(sum(DeltaF_sp)))
+    deltaf_absmax_local = maxval(abs(real(DeltaF_sp,kind=dp)))
+    call MPI_ALLREDUCE(finite_local,finite_global,1,MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,ierr)
+    call MPI_ALLREDUCE(deltaf_absmax_local,deltaf_absmax_global,1,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,ierr)
+    if (myid.eq.0) then
+      if (finite_global.eq.0) then
+        write(*,*) "ERROR_ITERGPU: at least one rank has non-finite DeltaF_sp before MPI_ALLREDUCE"
+      end if
+      write(*,*) "DEBUG_ITERGPU: global max|DeltaF_sp| before reduce =",deltaf_absmax_global
+    end if
+    if (finite_local.eq.0) then
+      c_bad = -1; i_bad = -1; q_bad = -1
+      do q_idx=1,nptk
+        do i=1,Nbands
+          do c=1,3
+            if (.not. ieee_is_finite(DeltaF_sp(c,i,q_idx))) then
+              c_bad=c; i_bad=i; q_bad=q_idx
+              exit
+            end if
+          end do
+          if (c_bad.gt.0) exit
+        end do
+        if (c_bad.gt.0) exit
+      end do
+      write(*,*) "ERROR_ITERGPU: rank",myid," local DeltaF_sp non-finite at (c,i,q)=",&
+                 c_bad,i_bad,q_bad," value=",DeltaF_sp(c_bad,i_bad,q_bad)
+    end if
     if (myid.eq.0) then
       if (.not. ieee_is_finite(sum(DeltaF_sp))) then
         write(*,*) "ERROR_ITERGPU: DeltaF_sp becomes non-finite before MPI_ALLREDUCE"
