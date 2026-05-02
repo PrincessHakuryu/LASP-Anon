@@ -920,7 +920,7 @@ subroutine NP_driver(energy,velocity,Nlist,List,IJK, &
                   dvz = velocity_sp(3, j, ii) - velocity_sp(3, k, ss_p)
                   sigma_sp = scalebroad_sp * base_sigma_sp(dvx,dvy,dvz)
                   delta_sp = omega_sp + omegap_sp - omegadp_sp
-                  if (abs(delta_sp) .le. (2.0_sp*sigma_sp)) then
+                  if ((sigma_sp .gt. 0.0_sp) .and. (abs(delta_sp) .le. (2.0_sp*sigma_sp))) then
                     !$acc atomic update
                     N_plus(mm) = N_plus(mm) + 1
                     contrib_sp = exp( - (delta_sp*delta_sp) / (sigma_sp*sigma_sp) ) * (inv_norm_sp / sigma_sp)
@@ -935,7 +935,7 @@ subroutine NP_driver(energy,velocity,Nlist,List,IJK, &
                   dvz = velocity_sp(3, j, ii) - velocity_sp(3, k, ss_m)
                   sigma_sp = scalebroad_sp * base_sigma_sp(dvx,dvy,dvz)
                   delta_sp = omega_sp - omegap_sp - omegadp_sp
-                  if (abs(delta_sp) .le. (2.0_sp*sigma_sp)) then
+                  if ((sigma_sp .gt. 0.0_sp) .and. (abs(delta_sp) .le. (2.0_sp*sigma_sp))) then
                       !$acc atomic update
                       N_minus(mm) = N_minus(mm) + 1
                       contrib_sp = exp( - (delta_sp*delta_sp) / (sigma_sp*sigma_sp) ) * (inv_norm_sp / sigma_sp)
