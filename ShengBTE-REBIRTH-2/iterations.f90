@@ -27,6 +27,7 @@ module iterations
   use config
   use wedgetc
   use mpi
+  use, intrinsic :: ieee_arithmetic
   implicit none
 !================ 持久化（仅主机端） ================
   logical :: host_inited    = .false.
@@ -37,6 +38,7 @@ module iterations
   integer :: IsoN_saved     = 0
   integer :: sz_Gp_saved    = 0
   integer :: sz_Gm_saved    = 0
+  logical :: itergpu_debug_header_printed = .false.
 
   
 
@@ -285,6 +287,17 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
     N_plus_max  = maxval(N_plus)
     N_minus_max = maxval(N_minus)
 
+    if (myid.eq.0 .and. .not. itergpu_debug_header_printed) then
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(TypeofSymmetry)=",minval(TypeofSymmetry),maxval(TypeofSymmetry)
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(ID_equi)=",minval(ID_equi),maxval(ID_equi)
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(ALLEquiList)=",minval(ALLEquiList),maxval(ALLEquiList)
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(N_plus,N_minus)=",minval(N_plus),maxval(N_plus),minval(N_minus),maxval(N_minus)
+      write(*,*) "DEBUG_ITERGPU_INPUT: finite(Gamma_plus_sp,Gamma_minus_sp,tau_zero_sp,F_sp)=", &
+           ieee_is_finite(sum(Gamma_plus_sp)), ieee_is_finite(sum(Gamma_minus_sp)), &
+           ieee_is_finite(sum(tau_zero_sp)), ieee_is_finite(sum(F_sp))
+      itergpu_debug_header_printed = .true.
+    end if
+
     ! if (myid.eq.0) write(*,'(A,4(I0,1X))') " Info: dims Nequi_max nstates N+max N-max = ", &
     !                                        Nequi_max, nstates, N_plus_max, N_minus_max
 
@@ -400,8 +413,19 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
     end if
 
     !$acc update self(DeltaF_sp)
+    if (myid.eq.0) then
+      if (.not. ieee_is_finite(sum(DeltaF_sp))) then
+        write(*,*) "ERROR_ITERGPU: DeltaF_sp becomes non-finite before MPI_ALLREDUCE"
+        write(*,*) "DEBUG_ITERGPU: max|DeltaF_sp|=", maxval(abs(DeltaF_sp))
+      end if
+    end if
     call MPI_BARRIER(MPI_COMM_WORLD, ierr)
     call MPI_ALLREDUCE(MPI_IN_PLACE, DeltaF_sp, nptk*Nbands*3, MPI_REAL, MPI_SUM, MPI_COMM_WORLD, ierr)
+    if (myid.eq.0) then
+      if (.not. ieee_is_finite(sum(DeltaF_sp))) then
+        write(*,*) "ERROR_ITERGPU: DeltaF_sp non-finite after MPI_ALLREDUCE"
+      end if
+    end if
     !$acc update device(DeltaF_sp)
 
     !$acc parallel loop gang collapse(3)                                      &
@@ -421,6 +445,13 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
       end do
     end do
     !$acc end parallel
+    !$acc update self(F_sp)
+    if (myid.eq.0) then
+      if (.not. ieee_is_finite(sum(F_sp))) then
+        write(*,*) "ERROR_ITERGPU: F_sp non-finite right after F update kernel"
+        write(*,*) "DEBUG_ITERGPU: max|tau_zero_sp|=", maxval(abs(tau_zero_sp)), " max|DeltaF_sp|=", maxval(abs(DeltaF_sp))
+      end if
+    end if
 
     if (IsoN > 0) then
       !$acc exit data delete(Iso_Ind1, Iso_Ind2, Gamma_iso_sp)
