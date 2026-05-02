@@ -300,6 +300,17 @@ subroutine iterationgpu(Nlist,Nequi,ALLEquiList,TypeofSymmetry,N_plus,N_minus, &
       itergpu_debug_header_printed = .true.
     end if
 
+    if (myid.eq.0 .and. .not. itergpu_debug_header_printed) then
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(TypeofSymmetry)=",minval(TypeofSymmetry),maxval(TypeofSymmetry)
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(ID_equi)=",minval(ID_equi),maxval(ID_equi)
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(ALLEquiList)=",minval(ALLEquiList),maxval(ALLEquiList)
+      write(*,*) "DEBUG_ITERGPU_INPUT: min/max(N_plus,N_minus)=",minval(N_plus),maxval(N_plus),minval(N_minus),maxval(N_minus)
+      write(*,*) "DEBUG_ITERGPU_INPUT: finite(Gamma_plus_sp,Gamma_minus_sp,tau_zero_sp,F_sp)=", &
+           ieee_is_finite(sum(Gamma_plus_sp)), ieee_is_finite(sum(Gamma_minus_sp)), &
+           ieee_is_finite(sum(tau_zero_sp)), ieee_is_finite(sum(F_sp))
+      itergpu_debug_header_printed = .true.
+    end if
+
     ! if (myid.eq.0) write(*,'(A,4(I0,1X))') " Info: dims Nequi_max nstates N+max N-max = ", &
     !                                        Nequi_max, nstates, N_plus_max, N_minus_max
 
