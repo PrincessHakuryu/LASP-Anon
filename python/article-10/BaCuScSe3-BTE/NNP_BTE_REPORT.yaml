@@ -1,0 +1,57 @@
+schema_version: 1
+workflow_status: started
+created_at: '2026-09-15T23:26:49'
+case_name: BaCuScSe3-BTE
+workdir: /home15/liangqm/ChihayaAnon-main/python/article-10/BaCuScSe3-BTE
+source_poscar: /home15/liangqm/ChihayaAnon-main/python/article-10/BaCuScSe3/POSCAR
+parameters:
+  fc2_dim:
+  - 2
+  - 2
+  - 1
+  fc3_dim:
+  - 2
+  - 2
+  - 1
+  fc2_distance_A: 0.01
+  fc3_cutoff: '-3'
+  qgrid:
+  - 12
+  - 12
+  - 12
+  nac: false
+  clean_intermediates: true
+outputs: {}
+relaxation:
+  enabled: false
+  input_poscar: /home15/liangqm/ChihayaAnon-main/python/article-10/BaCuScSe3-BTE/POSCAR.input
+  output_poscar: /home15/liangqm/ChihayaAnon-main/python/article-10/BaCuScSe3-BTE/POSCAR
+  structure:
+    formula: Ba2Cu2Sc2Se6
+    natoms: 12
+    volume_A3: 291.6817862029537
+    cell_lengths_A:
+    - 7.300897382884175
+    - 7.300897382884175
+    - 10.237267
+    cell_angles_deg:
+    - 90.0
+    - 90.0
+    - 147.68789819643519
+    cell_matrix_A:
+    - - 2.031507
+      - -7.012566
+      - 0.0
+    - - 2.031507
+      - 7.012566
+      - 0.0
+    - - 0.0
+      - 0.0
+      - 10.237267
+  calculator_eval:
+    energy_error: NotImplementedError("MLIR translation rule for primitive 'conv_fwd'
+      not found for platform cpu")
+    forces_error: NotImplementedError("MLIR translation rule for primitive 'conv_fwd'
+      not found for platform cpu")
+    stress_error: NotImplementedError("MLIR translation rule for primitive 'conv_fwd'
+      not found for platform cpu")

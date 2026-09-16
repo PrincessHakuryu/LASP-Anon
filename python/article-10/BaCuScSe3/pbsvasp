@@ -1,0 +1,42 @@
+#!/bin/bash
+#PBS -N VASP
+#PBS -l walltime=1500:00:00
+#PBS -V
+#PBS -j oe
+#PBS -q batch
+#PBS -l nodes=1:ppn=32:gpus=4
+
+cd $PBS_O_WORKDIR
+#!/bin/bash
+
+# Generate current date and time
+current_time=$(date +"%Y-%m-%d %H:%M:%S")
+
+# Get the current working directory
+current_directory=$(pwd)
+
+# Construct the email content with task start time and current directory
+email_content="Subject: Task Started at $current_time\n\nTask started at: $current_time\nCurrent working directory: $current_directory"
+
+# Send the email using msmtp
+echo -e "$email_content" | msmtp 1148022180@qq.com
+
+source ~/vasp.sh
+mpirun -np 4 --map-by node:PE=8 --bind-to core -x OMP_NUM_THREADS=8 -x OMP_STACKSIZE=5120m -x OMP_PLACES=cores -x OMP_PROC_BIND=close vasp_std > outcar
+
+#!/bin/bash
+
+# Generate current date and time
+current_time=$(date +"%Y-%m-%d %H:%M:%S")
+
+# Get the current working directory
+current_directory=$(pwd)
+
+# Construct the email content with task start time and current directory
+email_content="Subject: Task Ended at $current_time\n\nTask edned at: $current_time\nCurrent working directory: $current_directory"
+
+# Send the email using msmtp
+echo -e "$email_content" | msmtp 1148022180@qq.com
+
+
+

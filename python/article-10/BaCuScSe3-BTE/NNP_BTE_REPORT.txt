@@ -1,0 +1,22 @@
+NNP/Anon BTE generation report
+==================================
+case_name: BaCuScSe3-BTE
+source_poscar: /home15/liangqm/ChihayaAnon-main/python/article-10/BaCuScSe3/POSCAR
+created_at: 2026-09-15T23:26:49
+workflow_status: started
+
+[NNP relaxation]
+enabled: False
+
+[FC2 harmonic stability]
+analysis_status: None
+label: None
+severity: None
+reason: None
+
+[Generated final files]
+FORCE_CONSTANTS_2ND: None
+FORCE_CONSTANTS_3RD: None
+CONTROL: None
+
+Note: FC3/CONTROL are generated regardless of the stability label; use the label only for later filtering.

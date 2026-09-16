@@ -1,0 +1,36 @@
+# Read Space Group Number from the SYMMETRY.in file if it exists. 
+   63          #Space group number of the input structure
+ 
+Symmetry Operation:     8
+  1  0  0
+  0  1  0
+  0  0  1
+ 
+ -1  0  0
+  0 -1  0
+  0  0 -1
+ 
+ -1  0  0
+  0 -1  0
+  0  0  1
+ 
+  1  0  0
+  0  1  0
+  0  0 -1
+ 
+  0  1  0
+  1  0  0
+  0  0 -1
+ 
+  0 -1  0
+ -1  0  0
+  0  0  1
+ 
+  0 -1  0
+ -1  0  0
+  0  0 -1
+ 
+  0  1  0
+  1  0  0
+  0  0  1
+ 
