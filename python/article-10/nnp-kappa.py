@@ -78,7 +78,7 @@ NNP_DEVICE = "cuda"
 
 # For Nequix, edit these if CALCULATOR_KIND = "nequix".
 NEQUIX_MODEL_NAME = "nequix-oam-1-pft"
-NEQUIX_BACKEND = "torch"
+NEQUIX_BACKEND = "jax"
 NEQUIX_USE_KERNEL = True
 
 
