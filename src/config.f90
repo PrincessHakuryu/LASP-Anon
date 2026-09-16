@@ -1,11 +1,14 @@
-!  ShengBTE, a solver for the Boltzmann Transport Equation for phonons
-!  Copyright (C) 2012-2023 Wu Li <wu.li.phys2011@gmail.com>
-!  Copyright (C) 2012-2023 Jesús Carrete Montaña <jcarrete@gmail.com>
-!  Copyright (C) 2012-2023 Nebil Ayape Katcho <nebil.ayapekatcho@cea.fr>
-!  Copyright (C) 2012-2023 Natalio Mingo Bisquert <natalio.mingo@cea.fr>
-!  Copyright (C) 2021-2022 Fanchen Meng <fanchem@g.clemson.edu>
-!  Copyright (C) 2022-2023 Ben Durham <bd740@york.ac.uk>
-!  Copyright (C) 2023 Martí Raya Moreno <marti_94@hotmail.com>
+!  ChihayaAnon, a GPU-accelerated derivative of ShengBTE
+!  A solver for the Boltzmann Transport Equation for phonons
+!
+!  Copyright (C) 2012-2023 Wu Li wu.li.phys2011@gmail.com
+!  Copyright (C) 2012-2023 Jesús Carrete Montaña jcarrete@gmail.com
+!  Copyright (C) 2012-2023 Nebil Ayape Katcho nebil.ayapekatcho@cea.fr
+!  Copyright (C) 2012-2023 Natalio Mingo Bisquert natalio.mingo@cea.fr
+!  Copyright (C) 2021-2022 Fanchen Meng fanchem@g.clemson.edu
+!  Copyright (C) 2022-2023 Ben Durham bd740@york.ac.uk
+!  Copyright (C) 2023 Martí Raya Moreno marti_94@hotmail.com
+!  Copyright (C) 2026 Q. M. Liang
 !
 !  This program is free software: you can redistribute it and/or modify
 !  it under the terms of the GNU General Public License as published by
@@ -18,7 +21,12 @@
 !  GNU General Public License for more details.
 !
 !  You should have received a copy of the GNU General Public License
-!  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+!  along with this program.  If not, see
+!  https://www.gnu.org/licenses/.
+!
+!  Modifications by Q. M. Liang, 2026:
+!  - GPU-oriented implementation
+!  - DIIS/Pulay mixing
 
 ! Variables and routines used to read and store the configuration.
 module config
