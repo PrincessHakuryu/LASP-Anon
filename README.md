@@ -28,6 +28,8 @@ This version introduces several additional options in the configuration file.
 - `alpha`: Specifies the linear-mixing coefficient used when DIIS is disabled. The default value is `0.5`, which mixes the old and newly calculated results equally.
 
 ### Example input
+
+```fortran
 &allocations
     nelements=4
     natoms=24
@@ -80,5 +82,16 @@ This version introduces several additional options in the configuration file.
     itergpu=.TRUE.
     DIIS=.TRUE.
 &end
+
+```
+
 ### Running 
-mpirun -np 1 --map-by numa:PE=8 --bind-to core --report-bindings -x OMP_NUM_THREADS=8 -x OMP_PLACES=cores -x OMP_PROC_BIND=close --mca coll_hcoll_enable 0 /home15/liangqm/ChihayaAnon-main/ShengBTE
+
+```bash
+mpirun -np 1 --map-by numa:PE=8 --bind-to core --report-bindings \
+  -x OMP_NUM_THREADS=8 \
+  -x OMP_PLACES=cores \
+  -x OMP_PROC_BIND=close \
+  --mca coll_hcoll_enable 0 \
+  /home15/liangqm/ChihayaAnon-main/ShengBTE
+```
