@@ -88,6 +88,21 @@ This version introduces several additional options in the configuration file.
 ### Running 
 
 ```bash
+#activate NV-HPC environment first 
+export NVCOMPILERS=/home14/liangqm/QUANTUM_ESPRESSO/hpc_sdk/Linux_x86_64
+export NVHPC_VERSION=24.5
+
+export PATH=$NVCOMPILERS/$NVHPC_VERSION/compilers/bin:$PATH
+export PATH=$NVCOMPILERS/$NVHPC_VERSION/comm_libs/mpi/bin:$PATH
+
+export MANPATH=$MANPATH:$NVCOMPILERS/$NVHPC_VERSION/compilers/man
+export MANPATH=$MANPATH:$NVCOMPILERS/$NVHPC_VERSION/comm_libs/mpi/man
+
+export LD_LIBRARY_PATH=$NVCOMPILERS/$NVHPC_VERSION/compilers/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$NVCOMPILERS/$NVHPC_VERSION/comm_libs/mpi/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$NVCOMPILERS/$NVHPC_VERSION/compilers/extras/qd/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$NVCOMPILERS/$NVHPC_VERSION/cuda/12.4/targets/x86_64-linux/lib:$LD_LIBRARY_PATH
+
 mpirun -np 1 --map-by numa:PE=8 --bind-to core --report-bindings \
   -x OMP_NUM_THREADS=8 \
   -x OMP_PLACES=cores \
