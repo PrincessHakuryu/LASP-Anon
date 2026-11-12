@@ -1,6 +1,6 @@
-# AMM¡äQ3 Reference Structures and NNP¨CShengBTE Workflow
+# AMM'Q3 Reference Structures and MLP-ShengBTE Workflow
 
-This folder contains the ten reference AMM¡äQ3 structures used in the paper.
+This folder contains the ten reference AMM'Q3 structures used in the paper.
 
 ## Required environment
 
@@ -15,7 +15,7 @@ torch     2.7.0+cu126
 jax       0.10.1
 lxml      6.1.0
 ```
-
+!WARNING: As time passed, the nequix may not be directly installed following nequix repository's instructions due to package version conflicts.
 The `thirdorder` package is also required. Install it from its GitHub repository and provide the path to `thirdorder_vasp.py` when running the script.
 
 ## Optional calculator packages
@@ -34,13 +34,12 @@ Each structure should contain a `POSCAR` file:
 
 ```text
 article-10/
-©À©¤©¤ BaCuScSe3/
-©¦   ©¸©¤©¤ POSCAR
-©À©¤©¤ BaCuScTe3/
-©¦   ©¸©¤©¤ POSCAR
-©À©¤©¤ CsZnYS3/
-©¦   ©¸©¤©¤ POSCAR
-©¸©¤©¤ ...
+â”œâ”€â”€ BaCuScSe3/
+â”‚   â””â”€â”€ POSCAR
+â”œâ”€â”€ BaCuScTe3/
+â”‚   â””â”€â”€ POSCAR
+â””â”€â”€ CsZnYS3/
+    â””â”€â”€ POSCAR
 ```
 
 ## Configuring the neural-network potential
@@ -83,13 +82,12 @@ The output directory will contain:
 
 ```text
 article-10/
-©À©¤©¤ BaCuScSe3-BTE/
-©¦   ©À©¤©¤ POSCAR
-©¦   ©À©¤©¤ CONTROL
-©¦   ©À©¤©¤ FORCE_CONSTANTS_2ND
-©¦   ©À©¤©¤ FORCE_CONSTANTS_3RD
-©¦   ©¸©¤©¤ NNP_BTE_REPORT.yaml
-©¸©¤©¤ ...
+â””â”€â”€ BaCuScSe3-BTE/
+    â”œâ”€â”€ POSCAR
+    â”œâ”€â”€ CONTROL
+    â”œâ”€â”€ FORCE_CONSTANTS_2ND
+    â”œâ”€â”€ FORCE_CONSTANTS_3RD
+    â””â”€â”€ NNP_BTE_REPORT.yaml
 ```
 
 The script generates the second- and third-order force constants and a `CONTROL` file for ShengBTE. ShengBTE must be run separately after this workflow.
