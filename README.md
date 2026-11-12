@@ -1,5 +1,4 @@
 # LASP-Anon: GPU accelerated ShengBTE
-It is also called ChihayaAnon (From Bang Dream! It's MyGO!!!!!) 
 
 Install(the same as OpenACC version VASP):
 1. Download and install intel oneapi-toolkit
